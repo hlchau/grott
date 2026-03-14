@@ -86,6 +86,7 @@ class Forward:
             return False  
 
 class Proxy:
+    client_timeouts_s = {}
     input_list = []
     channel = {}
 
@@ -126,13 +127,32 @@ class Proxy:
         while 1:
             time.sleep(delay)
             ss = select.select
-            inputready, outputready, exceptready = ss(self.input_list, [], [])
+            inputready, outputready, exceptready = ss(self.input_list, [], [], conf.select_timeout_s)
+            if (not inputready):
+                for key in list(self.client_timeouts_s.keys()):
+                    # Skip sockets, which have been removed in the meantime.
+                    if (key not in self.client_timeouts_s):
+                        continue
+                    # Increase timeout counter.
+                    self.client_timeouts_s[key] += conf.select_timeout_s
+                    # If the timeout limit was reached, consider the socket to be broken or already
+                    # closed by the remote.
+                    if (self.client_timeouts_s[key] >= conf.client_timeout_s):
+                        try:
+                            print("\t - Grott connection closed (timeout): remote={}".format(key.getpeername()))
+                        except:
+                            print("\t - Grott connection closed (timeout)")
+                        self.s = key
+                        self.on_close(conf)
+                continue
             for self.s in inputready:
                 if self.s == self.server:
                     self.on_accept(conf)
                     break
                 try: 
                     self.data, self.addr = self.s.recvfrom(buffer_size)
+                    # Reset timeout counter for the socket we just received from.
+                    self.client_timeouts_s[self.s] = 0
                 except: 
                     if conf.verbose : print("\t - Grott connection error") 
                     self.on_close(conf)   
@@ -152,6 +172,9 @@ class Proxy:
             self.input_list.append(forward)
             self.channel[clientsock] = forward
             self.channel[forward] = clientsock
+            # Initialize timeout counters for the new proxy and forwarder socket.
+            self.client_timeouts_s[clientsock] = 0
+            self.client_timeouts_s[forward] = 0
         else:
             if conf.verbose: 
                 print("\t - Can't establish connection with remote server."),
@@ -177,6 +200,10 @@ class Proxy:
         # delete both objects from channel dict
         del self.channel[out]
         del self.channel[self.s]
+        # Delete timeout counter for proxy/grott socket.
+        del self.client_timeouts_s[self.s]
+        # Delete timeout counter for forwarder/growatt socket.
+        del self.client_timeouts_s[out]
 
     def on_recv(self,conf):
         data = self.data      
@@ -233,6 +260,8 @@ class Proxy:
 
         # send data to destination
         self.channel[self.s].send(data)
+        # Reset timeout counter for the socket we just sent data to.
+        self.client_timeouts_s[self.channel[self.s]] = 0
         if len(data) > conf.minrecl :
             #process received data
             procdata(conf,data)    

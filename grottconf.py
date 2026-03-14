@@ -35,6 +35,9 @@ class Conf :
         self.outfile ="sys.stdout"  
         self.tmzone = "local"                                                                       #set timezone (at this moment only used for influxdb)                
 
+        self.select_timeout_s = 60 * 1                                                              # Timeout for select()
+        self.client_timeout_s = 60 * 5                                                              # Time without any received packets from growatt device until it will be considered as disconnected
+
         #Growatt server default 
         #self.growattip = "47.91.67.66"
         self.growattip = "server.growatt.com"
